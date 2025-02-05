@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Gas Molecule Separation Game</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.js"></script>
+  <style>
+    /* Body background: white */
+    body {
+      margin: 0;
+      padding: 0;
+      background: white;
+      font-family: Arial, sans-serif;
+    }
+    /* Wrapper for the game box and mobile buttons */
+    #gameWrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 20px;  /* space from the top of the window */
+    }
+    /* The game container where Phaser will render the canvas */
+    #game-container {
+      border: 2px solid black;
+      background: linear-gradient(to bottom, #87CEEB, #1E90FF);
+    }
+    /* Mobile door-control buttons, now positioned below the game box */
+    #mobileButtons {
+      margin-top: 10px;
+      display: flex;
+      justify-content: space-between; /* Evenly space buttons across the container */
+    }
+    .door-button {
+      width: 60px;
+      height: 60px;
+      font-size: 24px;
+      opacity: 0.8;
+    }
+    /* Win overlay – covers the entire viewport */
+    #winOverlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 10;
+    }
+    #winOverlayContent {
+      background-color: #fff;
+      padding: 20px 40px;
+      border-radius: 10px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="gameWrapper">
+    <div id="game-container"></div>
+    <div id="mobileButtons">
+      <button id="doorButton0" class="door-button">H</button>
+      <button id="doorButton1" class="door-button">J</button>
+      <button id="doorButton2" class="door-button">K</button>
+      <button id="doorButton3" class="door-button">L</button>
+    </div>
+  </div>
+
+  <div id="winOverlay">
+    <div id="winOverlayContent">
+      <h1>You win!!</h1>
+      <button id="resetButton">Play Again</button>
+    </div>
+  </div>
+
+  <script>
+    /********************************************************************
+     * Game Constants (feel free to adjust these to modify the game)
+     ********************************************************************/
+    // Compute game box dimensions based on browser window height.
+    // The game box fills about 85% of the window height.
+    const GAME_BOX_HEIGHT = Math.floor(window.innerHeight * 0.85);
+    // Because the height is twice the width (each compartment is a square):
+    const GAME_BOX_WIDTH = Math.floor(GAME_BOX_HEIGHT / 2);
+    const BOX_WIDTH = GAME_BOX_WIDTH;    // Game box width (in pixels)
+    const BOX_HEIGHT = GAME_BOX_HEIGHT;    // Game box height (in pixels)
+
+    const BALL_RADIUS = 10;                // Radius of each ball
+    // Total number of balls per compartment.
+    // (For example, 12 means 6 white and 6 black per compartment.)
+    // Set this to an even number.
+    const BALL_COUNT_PER_COMPARTMENT = 12;
+    // Slowed down by 50% relative to the previous version.
+    const BALL_SPEED_MIN = 4;              // Minimum initial speed (pixels/frame)
+    const BALL_SPEED_MAX = 6;              // Maximum initial speed
+
+    const PARTITION_Y = BOX_HEIGHT / 2;    // Y-coordinate for the horizontal partition
+    const PARTITION_THICKNESS = 2;         // Make partition as thin as the border (2px)
+    const DOOR_COUNT = 4;                  // Number of door segments in the partition
+    const DOOR_WIDTH = BOX_WIDTH / DOOR_COUNT; // Each door is exactly 1/4 of the box width
+
+    // Colors for balls (using hexadecimal color values)
+    const BALL_COLORS = {
+      white: 0xffffff,
+      black: 0x000000
+    };
+
+    // Global array to track door “open” states from mobile buttons.
+    // For each door index (0–3), true means the door is open.
+    let doorOpenState = [false, false, false, false];
+
+    // Set the mobileButtons container width to match the game area width.
+    document.getElementById("mobileButtons").style.width = BOX_WIDTH + "px";
+
+    /********************************************************************
+     * Main Phaser Scene
+     ********************************************************************/
+    class MainScene extends Phaser.Scene {
+      constructor() {
+        super('MainScene');
+      }
+
+      preload() {
+        // No external assets.
+      }
+
+      create() {
+        // --- Setup Matter physics world boundaries ---
+        // Adds four invisible walls around the game box.
+        this.matter.world.setBounds(0, 0, BOX_WIDTH, BOX_HEIGHT);
+
+        // --- Create the Balls ---
+        // For each compartment (top and bottom), create (BALL_COUNT_PER_COMPARTMENT / 2) white and (BALL_COUNT_PER_COMPARTMENT / 2) black balls.
+        this.balls = [];
+        // Top compartment (y < PARTITION_Y)
+        for (let i = 0; i < BALL_COUNT_PER_COMPARTMENT / 2; i++) {
+          let x = Phaser.Math.Between(BALL_RADIUS + 1, BOX_WIDTH - BALL_RADIUS - 1);
+          let y = Phaser.Math.Between(BALL_RADIUS + 1, PARTITION_Y - BALL_RADIUS - 1);
+          this.createBall(x, y, BALL_COLORS.white);
+
+          x = Phaser.Math.Between(BALL_RADIUS + 1, BOX_WIDTH - BALL_RADIUS - 1);
+          y = Phaser.Math.Between(BALL_RADIUS + 1, PARTITION_Y - BALL_RADIUS - 1);
+          this.createBall(x, y, BALL_COLORS.black);
+        }
+        // Bottom compartment (y > PARTITION_Y)
+        for (let i = 0; i < BALL_COUNT_PER_COMPARTMENT / 2; i++) {
+          let x = Phaser.Math.Between(BALL_RADIUS + 1, BOX_WIDTH - BALL_RADIUS - 1);
+          let y = Phaser.Math.Between(PARTITION_Y + BALL_RADIUS + 1, BOX_HEIGHT - BALL_RADIUS - 1);
+          this.createBall(x, y, BALL_COLORS.white);
+
+          x = Phaser.Math.Between(BALL_RADIUS + 1, BOX_WIDTH - BALL_RADIUS - 1);
+          y = Phaser.Math.Between(PARTITION_Y + BALL_RADIUS + 1, BOX_HEIGHT - BALL_RADIUS - 1);
+          this.createBall(x, y, BALL_COLORS.black);
+        }
+
+        // --- Create the Partition as Door Segments ---
+        // Each door segment is a static Matter body.
+        // When closed, the segment is visible as a thin black line.
+        // When its door is “opened,” it becomes a sensor and is not drawn.
+        this.doors = [];
+        for (let i = 0; i < DOOR_COUNT; i++) {
+          let doorX = DOOR_WIDTH / 2 + i * DOOR_WIDTH;
+          let door = this.add.rectangle(doorX, PARTITION_Y, DOOR_WIDTH, PARTITION_THICKNESS, 0x000000);
+          // Add a static Matter physics body.
+          this.matter.add.gameObject(door, { isStatic: true });
+          door.setFriction(0);
+          door.setFrictionAir(0);
+          door.setBounce(1);
+          door.isClosed = true;  // For our own tracking.
+          this.doors.push(door);
+        }
+
+        // --- Create Tick Marks to Delineate the Doors ---
+        // Three 1-pixel–wide vertical tick marks are drawn at door boundaries.
+        this.tickMarks = [];
+        for (let i = 1; i < DOOR_COUNT; i++) {
+          let tickX = i * DOOR_WIDTH;
+          // Draw a tick mark as a white rectangle (1px wide, 8px tall).
+          let tick = this.add.rectangle(tickX, PARTITION_Y, 1, 8, 0xffffff);
+          tick.setOrigin(0.5, 0.5);
+          tick.setDepth(10);  // Ensure they are drawn on top.
+          this.tickMarks.push(tick);
+        }
+
+        // --- Create Keyboard Inputs for Door Control (H, J, K, L) ---
+        this.doorKeys = [
+          this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.H),
+          this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.J),
+          this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K),
+          this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L)
+        ];
+
+        // --- Create a Timer Text (with 0.1 sec precision) ---
+        this.startTime = this.time.now;
+        this.timerText = this.add.text(10, 10, "Time: 0.0s", { font: "24px Arial", fill: "#ffffff" });
+
+        // --- Setup Mobile Button Event Listeners ---
+        for (let i = 0; i < DOOR_COUNT; i++) {
+          let button = document.getElementById("doorButton" + i);
+          if (button) {
+            button.addEventListener("touchstart", function(e) {
+              doorOpenState[i] = true;
+              e.preventDefault();
+            });
+            button.addEventListener("touchend", function(e) {
+              doorOpenState[i] = false;
+              e.preventDefault();
+            });
+            button.addEventListener("mousedown", function(e) {
+              doorOpenState[i] = true;
+            });
+            button.addEventListener("mouseup", function(e) {
+              doorOpenState[i] = false;
+            });
+            button.addEventListener("mouseout", function(e) {
+              doorOpenState[i] = false;
+            });
+          }
+        }
+
+        // Initialize win condition tracking variables.
+        this.winConditionMetAt = null;
+        this.gameWon = false;
+      }
+
+      // Helper function to create a ball at (x, y) with a given color.
+      createBall(x, y, color) {
+        // Create a circle GameObject.
+        let ball = this.add.circle(x, y, BALL_RADIUS, color);
+        // Attach a Matter physics body (circle shape) to it.
+        this.matter.add.gameObject(ball, { shape: { type: 'circle', radius: BALL_RADIUS } });
+        // Set friction properties to zero and full restitution.
+        ball.setFriction(0);
+        ball.setFrictionAir(0);
+        ball.setBounce(1);
+        ball.body.friction = 0;
+        ball.body.frictionAir = 0;
+        ball.body.frictionStatic = 0;
+        ball.body.restitution = 1;
+        // Give the ball a random initial velocity.
+        let angle = Phaser.Math.FloatBetween(0, 2 * Math.PI);
+        let speed = Phaser.Math.FloatBetween(BALL_SPEED_MIN, BALL_SPEED_MAX);
+        ball.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+        // Store the ball’s intended speed for later correction.
+        ball.desiredSpeed = speed;
+        // Save its “color name” for win condition checking.
+        ball.ballColor = (color === BALL_COLORS.white) ? "white" : "black";
+        this.balls.push(ball);
+      }
+
+      update() {
+        // --- Enforce Constant Speed for Each Ball ---
+        // For perfect elastic collisions, re-normalize the ball's velocity each update.
+        for (let ball of this.balls) {
+          let vx = ball.body.velocity.x;
+          let vy = ball.body.velocity.y;
+          let currentSpeed = Math.sqrt(vx * vx + vy * vy);
+          if (currentSpeed > 0) {
+            let scale = ball.desiredSpeed / currentSpeed;
+            // Only adjust if there is a noticeable difference.
+            if (Math.abs(scale - 1) > 0.001) {
+              ball.setVelocity(vx * scale, vy * scale);
+            }
+          }
+        }
+
+        // --- Update Door Segments Based on Input ---
+        // If the corresponding key (or mobile button) is held down,
+        // the door opens: it becomes a sensor and is not drawn.
+        for (let i = 0; i < DOOR_COUNT; i++) {
+          let isKeyDown = this.doorKeys[i].isDown;
+          let isMobileDown = doorOpenState[i];
+          if (isKeyDown || isMobileDown) {
+            // Open door: disable collision and hide the door segment.
+            this.doors[i].setSensor(true);
+            this.doors[i].visible = false;
+          } else {
+            // Closed door: collisions active and segment visible.
+            this.doors[i].setSensor(false);
+            this.doors[i].visible = true;
+            // Ensure the color is black.
+            this.doors[i].fillColor = 0x000000;
+          }
+        }
+
+        // --- Update the Timer (with 0.1 sec precision) ---
+        let elapsed = (this.time.now - this.startTime) / 1000;
+        this.timerText.setText("Time: " + elapsed.toFixed(1) + "s");
+
+        // --- Check the Win Condition ---
+        // The game is won when one compartment contains only white balls
+        // and the other compartment contains only black balls.
+        let topWhite = 0, topBlack = 0, bottomWhite = 0, bottomBlack = 0;
+        for (let ball of this.balls) {
+          if (ball.y < PARTITION_Y) {
+            if (ball.ballColor === "white") {
+              topWhite++;
+            } else {
+              topBlack++;
+            }
+          } else {
+            if (ball.ballColor === "white") {
+              bottomWhite++;
+            } else {
+              bottomBlack++;
+            }
+          }
+        }
+
+        let winConditionSatisfied =
+          ((topWhite > 0 && topBlack === 0 && bottomBlack > 0 && bottomWhite === 0) ||
+           (topBlack > 0 && topWhite === 0 && bottomWhite > 0 && bottomBlack === 0));
+
+        if (winConditionSatisfied) {
+          // If this is the first frame the condition is met, record the time.
+          if (this.winConditionMetAt === null) {
+            this.winConditionMetAt = this.time.now;
+          }
+          // If the condition has been met continuously for 3 seconds and the game isn’t already won, win the game.
+          else if (this.time.now - this.winConditionMetAt >= 3000 && !this.gameWon) {
+            this.winGame();
+          }
+        } else {
+          // Reset the timer if the condition is broken.
+          this.winConditionMetAt = null;
+        }
+      }
+
+      // Called when the win condition is met.
+      winGame() {
+        if (this.gameWon) return;
+        this.gameWon = true;
+        // Pause the physics simulation.
+        this.matter.world.pause();
+        // Display the win overlay.
+        document.getElementById("winOverlay").style.display = "flex";
+      }
+    }
+
+    /********************************************************************
+     * Phaser Game Configuration
+     ********************************************************************/
+    const config = {
+      type: Phaser.AUTO,
+      width: BOX_WIDTH,
+      height: BOX_HEIGHT,
+      parent: "game-container",
+      /* Transparent so the body’s blue gradient shows through the border */
+      transparent: true,
+      physics: {
+        default: "matter",
+        matter: {
+          gravity: { y: 0 },
+          debug: false,
+          // Increase iterations to improve collision accuracy.
+          positionIterations: 20,
+          velocityIterations: 20
+        }
+      },
+      scene: MainScene
+    };
+
+    // Create the Phaser game instance.
+    const game = new Phaser.Game(config);
+
+    /********************************************************************
+     * Reset Button – Restart the game when "Play Again" is clicked.
+     ********************************************************************/
+    document.getElementById("resetButton").addEventListener("click", function() {
+      location.reload();
+    });
+  </script>
+</body>
+</html>
